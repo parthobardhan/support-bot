@@ -52,6 +52,25 @@ Thumbs.db
 .env.test.local
 .env.production.local
 
+# Configuration files with secrets (NEVER commit these)
+**/config.py
+backend/config.py
+config.py
+credentials.py
+secrets.py
+**/credentials.py
+**/secrets.py
+
+# API Keys and sensitive files
+*api_key*
+*secret*
+*password*
+*.pem
+*.p12
+*.pfx
+*.key
+!public.key
+
 # Logs
 logs/
 *.log
