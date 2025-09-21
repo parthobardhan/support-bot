@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 import requests
 import json
+import sys
+import os
 from requests.auth import HTTPDigestAuth
 
-# Atlas API credentials
-PUBLIC_KEY = "rbqfhhol"
-PRIVATE_KEY = "d380c0c0-f521-4193-b472-8b233cde15a4"
-DATABASE_NAME = "support_bot"
-COLLECTION_NAME = "knowledge_base"
+# Add backend directory to path to import Config
+sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
+from config import Config
 
 def create_vector_index():
-    auth = HTTPDigestAuth(PUBLIC_KEY, PRIVATE_KEY)
+    # Validate configuration before proceeding
+    Config.validate_config()
+    
+    auth = HTTPDigestAuth(Config.ATLAS_PUBLIC_KEY, Config.ATLAS_PRIVATE_KEY)
     
     # Step 1: Get Project ID
     print("Getting project ID...")
@@ -36,8 +39,8 @@ def create_vector_index():
     print("Creating vector search index...")
     
     index_definition = {
-        "database": DATABASE_NAME,
-        "collectionName": COLLECTION_NAME,
+        "database": Config.DATABASE_NAME,
+        "collectionName": Config.COLLECTION_NAME,
         "name": "vector_index",
         "type": "vectorSearch",
         "definition": {

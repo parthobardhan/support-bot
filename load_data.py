@@ -11,20 +11,21 @@ import requests
 import time
 import random
 
-# Configuration
-MONGODB_URI = "mongodb+srv://psb:passw0rd@demo-cluster-1.o9q0k.mongodb.net/?retryWrites=true&w=majority&appName=Demo-Cluster-1"
-DATABASE_NAME = "support_bot"
-COLLECTION_NAME = "knowledge_base"
-VOYAGE_API_KEY = "pa-TRb4Em9ehYAVf6JAkVYDFBHRh5Kf2AwxaJhvoKLVae8"
+# Add backend directory to path to import Config
+sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
+from config import Config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SimpleDataLoader:
     def __init__(self):
-        self.client = MongoClient(MONGODB_URI)
-        self.db = self.client[DATABASE_NAME]
-        self.collection = self.db[COLLECTION_NAME]
+        # Validate configuration before proceeding
+        Config.validate_config()
+        
+        self.client = MongoClient(Config.MONGODB_URI)
+        self.db = self.client[Config.DATABASE_NAME]
+        self.collection = self.db[Config.COLLECTION_NAME]
         
     def test_connection(self):
         try:
@@ -38,7 +39,7 @@ class SimpleDataLoader:
     def get_embedding(self, text):
         """Get embedding from Voyage AI"""
         headers = {
-            "Authorization": f"Bearer {VOYAGE_API_KEY}",
+            "Authorization": f"Bearer {Config.VOYAGE_API_KEY}",
             "Content-Type": "application/json"
         }
         

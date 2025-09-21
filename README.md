@@ -29,7 +29,28 @@ A comprehensive customer support RAG (Retrieval-Augmented Generation) applicatio
 
 ## 🔧 Setup Instructions
 
-### 1. Clone and Setup
+### 1. Environment Configuration
+
+**IMPORTANT**: This application uses environment variables for secure configuration. You must set up your environment variables before running the application.
+
+```bash
+# Copy the environment template
+cp env.template .env
+
+# Edit .env file and add your actual credentials
+# Required variables:
+# - MONGODB_URI: Your MongoDB Atlas connection string
+# - ATLAS_PUBLIC_KEY: MongoDB Atlas API public key
+# - ATLAS_PRIVATE_KEY: MongoDB Atlas API private key
+# - VOYAGE_API_KEY: Your Voyage AI API key
+```
+
+**Where to get the required credentials:**
+- **MongoDB Atlas URI**: From your Atlas cluster's "Connect" button
+- **Atlas API Keys**: From Atlas → Organization Settings → API Keys → Create API Key
+- **Voyage AI Key**: From your [Voyage AI account](https://www.voyageai.com/)
+
+### 2. Clone and Setup
 
 ```bash
 # Navigate to your project directory
@@ -40,15 +61,23 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-### 2. Create Vector Search Index
+### 3. Create Vector Search Index
 
+You can create the vector search index using the provided script:
+
+```bash
+# Run the Atlas index creation script
+python create_atlas_index.py
+```
+
+Alternatively, create it manually:
 1. Go to your MongoDB Atlas dashboard
 2. Navigate to your cluster
 3. Click on the "Search" tab
 4. Click "Create Index"
-5. Use the JSON configuration from `scripts/create_vector_index.json`
+5. Use "vector_index" as the index name and configure for the "embeddings" field
 
-### 3. Start the Application
+### 4. Start the Application
 
 ```bash
 # Start the backend server
