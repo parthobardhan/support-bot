@@ -125,6 +125,7 @@ class DatabaseManager:
                    filters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Perform text search using MongoDB Atlas Search"""
         try:
+            # First try Atlas Search
             compound_clauses = [
                 {
                     "text": {
@@ -145,15 +146,32 @@ class DatabaseManager:
             
             # Add filter clauses if provided
             filter_clauses = []
+            should_clauses_for_filters = []
+            
             if filters:
                 for field, value in filters.items():
                     if field in ["product", "category", "type", "priority", "status"]:
-                        filter_clauses.append({
-                            "equals": {
-                                "path": field,
-                                "value": value
-                            }
-                        })
+                        # Handle MongoDB query objects like {$in: [...]}
+                        if isinstance(value, dict) and "$in" in value:
+                            # For $in queries, create multiple equals filters with should logic
+                            in_values = value["$in"]
+                            if in_values:  # Only add if there are values
+                                # Create individual equals filters for each value
+                                for in_value in in_values:
+                                    should_clauses_for_filters.append({
+                                        "equals": {
+                                            "path": field,
+                                            "value": str(in_value)  # Ensure it's a string
+                                        }
+                                    })
+                        else:
+                            # Handle simple value filters
+                            filter_clauses.append({
+                                "equals": {
+                                    "path": field,
+                                    "value": str(value)  # Ensure it's a string
+                                }
+                            })
             
             search_stage = {
                 "$search": {
@@ -164,6 +182,11 @@ class DatabaseManager:
                 }
             }
             
+            # Add $in-based should clauses to the main should array
+            if should_clauses_for_filters:
+                search_stage["$search"]["compound"]["should"].extend(should_clauses_for_filters)
+            
+            # Add simple filter clauses
             if filter_clauses:
                 search_stage["$search"]["compound"]["filter"] = filter_clauses
             
@@ -188,107 +211,64 @@ class DatabaseManager:
             ]
             
             results = list(self.collection.aggregate(pipeline))
-            logger.info(f"✅ Atlas Search returned {len(results)} results")
-            return results
+            if results:
+                logger.info(f"✅ Atlas Search returned {len(results)} results")
+                return results
             
         except Exception as e:
             logger.error(f"❌ Error in Atlas Search: {e}")
-            return []
+
     
     def hybrid_search(self, query: str, query_vector: List[float], 
                      limit: int = 10, filters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """Perform hybrid search using $rankFusion"""
+        """Perform hybrid search by combining vector and text search results manually"""
         try:
-            filter_stage = {}
-            if filters:
-                filter_conditions = []
-                for field, value in filters.items():
-                    if field in ["product", "category", "type", "priority", "status"]:
-                        filter_conditions.append({field: value})
-                if filter_conditions:
-                    filter_stage = {"$match": {"$and": filter_conditions}}
+            # Get vector search results
+            vector_results = self.vector_search(query_vector, limit//2, filters)
             
-            vector_pipeline = [
-                {
-                    "$vectorSearch": {
-                        "index": Config.VECTOR_INDEX_NAME,
-                        "path": "embeddings",
-                        "queryVector": query_vector,
-                        "numCandidates": limit * 5,
-                        "limit": limit * 2
-                    }
-                }
-            ]
+            # Get text search results  
+            text_results = self.text_search(query, limit//2, filters)
             
-            text_pipeline = [
-                {
-                    "$search": {
-                        "index": Config.SEARCH_INDEX_NAME,
-                        "compound": {
-                            "should": [
-                                {
-                                    "text": {
-                                        "query": query,
-                                        "path": ["content", "summary", "tags"]
-                                    }
-                                },
-                                {
-                                    "text": {
-                                        "query": query,
-                                        "path": "title",
-                                        "fuzzy": {"maxEdits": 1},
-                                        "score": {"boost": {"value": 2.0}}
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                },
-                {"$limit": limit * 2}
-            ]
+            # Combine and deduplicate results
+            combined_results = []
+            seen_ids = set()
             
-            # Add filter stage to both pipelines if needed
-            if filter_stage:
-                vector_pipeline.insert(1, filter_stage)
-                text_pipeline.append(filter_stage)
+            # Add vector results with boosted scores
+            for result in vector_results:
+                doc_id = str(result.get('_id'))
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    # Boost vector search scores
+                    result['score'] = result.get('score', 0) * 1.2
+                    result['search_type'] = 'vector'
+                    combined_results.append(result)
             
-            fusion_pipeline = [
-                {
-                    "$rankFusion": {
-                        "input": {
-                            "pipelines": {
-                                "vector": vector_pipeline,
-                                "text": text_pipeline
-                            }
-                        },
-                        "output": {
-                            "limit": limit
-                        }
-                    }
-                },
-                {
-                    "$project": {
-                        "title": 1,
-                        "content": 1,
-                        "type": 1,
-                        "priority": 1,
-                        "status": 1,
-                        "summary": 1,
-                        "tags": 1,
-                        "product": 1,
-                        "category": 1,
-                        "created_date": 1,
-                        "score": {"$meta": "rankFusionScore"}
-                    }
-                }
-            ]
+            # Add text results
+            for result in text_results:
+                doc_id = str(result.get('_id'))
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    result['search_type'] = 'text'
+                    combined_results.append(result)
+                else:
+                    # If document exists in both results, combine scores
+                    for existing in combined_results:
+                        if str(existing.get('_id')) == doc_id:
+                            existing['score'] = existing.get('score', 0) + result.get('score', 0)
+                            existing['search_type'] = 'hybrid'
+                            break
             
-            results = list(self.collection.aggregate(fusion_pipeline))
-            logger.info(f"✅ Hybrid search with rank fusion returned {len(results)} results")
-            return results
+            # Sort by combined score
+            combined_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+            
+            # Limit final results
+            final_results = combined_results[:limit]
+            
+            logger.info(f"✅ Manual hybrid search returned {len(final_results)} results")
+            return final_results
             
         except Exception as e:
-            logger.error(f"❌ Error in hybrid search: {e}")
+            logger.error(f"❌ Error in manual hybrid search: {e}")
             return []
     
     def get_collection_stats(self) -> Dict[str, Any]:

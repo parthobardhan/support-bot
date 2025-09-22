@@ -13,14 +13,20 @@ from config import Config
 def create_atlas_search_index():
     """Create Atlas Search index with provided credentials"""
     
-    public_key = "rbqfhhol"
-    private_key = "d380c0c0-f521-4193-b472-8b233cde15a4"
+    # Validate configuration before proceeding
+    Config.validate_config()
     
-    auth = HTTPDigestAuth(public_key, private_key)
+    auth = HTTPDigestAuth(Config.ATLAS_PUBLIC_KEY, Config.ATLAS_PRIVATE_KEY)
+    
+    # Headers for Atlas Admin API v2
+    headers = {
+        "Accept": "application/vnd.atlas.2024-05-30+json",
+        "Content-Type": "application/vnd.atlas.2024-05-30+json"
+    }
     
     # Step 1: Get Project ID
     print("Getting project ID...")
-    response = requests.get("https://cloud.mongodb.com/api/atlas/v1.0/groups", auth=auth)
+    response = requests.get("https://cloud.mongodb.com/api/atlas/v2/groups", auth=auth, headers=headers)
     if response.status_code != 200:
         print(f"Error getting projects: {response.status_code}")
         print(response.text)
@@ -34,21 +40,9 @@ def create_atlas_search_index():
     project_id = projects[0]['id']
     print(f"Project ID: {project_id}")
     
-    # Step 2: Get Cluster Name
-    print("Getting cluster name...")
-    response = requests.get(f"https://cloud.mongodb.com/api/atlas/v1.0/groups/{project_id}/clusters", auth=auth)
-    if response.status_code != 200:
-        print(f"Error getting clusters: {response.status_code}")
-        print(response.text)
-        return False
-        
-    clusters = response.json()['results']
-    if not clusters:
-        print("No clusters found")
-        return False
-        
-    cluster_name = clusters[0]['name']
-    print(f"Cluster Name: {cluster_name}")
+    # Use configured cluster name instead of API discovery
+    cluster_name = Config.CLUSTER_NAME
+    print(f"Using configured cluster name: {cluster_name}")
     
     print("Creating Atlas Search index...")
     
@@ -56,49 +50,51 @@ def create_atlas_search_index():
         "database": Config.DATABASE_NAME,
         "collectionName": Config.COLLECTION_NAME,
         "name": Config.SEARCH_INDEX_NAME,
-        "mappings": {
-            "dynamic": False,
-            "fields": {
-                "title": {
-                    "type": "string",
-                    "analyzer": "lucene.standard"
-                },
-                "content": {
-                    "type": "string", 
-                    "analyzer": "lucene.standard"
-                },
-                "summary": {
-                    "type": "string",
-                    "analyzer": "lucene.standard"
-                },
-                "product": {
-                    "type": "string",
-                    "analyzer": "lucene.keyword"
-                },
-                "category": {
-                    "type": "string", 
-                    "analyzer": "lucene.keyword"
-                },
-                "tags": {
-                    "type": "string",
-                    "analyzer": "lucene.standard"
+        "type": "search",
+        "definition": {
+            "mappings": {
+                "dynamic": False,
+                "fields": {
+                    "title": {
+                        "type": "string",
+                        "analyzer": "lucene.standard"
+                    },
+                    "content": {
+                        "type": "string", 
+                        "analyzer": "lucene.standard"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "analyzer": "lucene.standard"
+                    },
+                    "product": {
+                        "type": "string",
+                        "analyzer": "lucene.keyword"
+                    },
+                    "category": {
+                        "type": "string", 
+                        "analyzer": "lucene.keyword"
+                    },
+                    "tags": {
+                        "type": "string",
+                        "analyzer": "lucene.standard"
+                    }
                 }
             }
         }
     }
     
-    url = f"https://cloud.mongodb.com/api/atlas/v1.0/groups/{project_id}/clusters/{cluster_name}/fts/indexes"
+    url = f"https://cloud.mongodb.com/api/atlas/v2/groups/{project_id}/clusters/{cluster_name}/search/indexes"
     
-    response = requests.post(url, json=index_definition, auth=auth, 
-                           headers={"Content-Type": "application/json"})
+    response = requests.post(url, json=index_definition, auth=auth, headers=headers)
     
-    if response.status_code == 200:
+    if response.status_code == 201:  # v2 API returns 201 for successful creation
         result = response.json()
         print("✅ Atlas Search index created successfully!")
-        print(f"Index ID: {result.get('indexID')}")
+        print(f"Index ID: {result.get('indexId')}")
         print("The index is being built and will be ready shortly.")
         
-        index_id = result.get('indexID')
+        index_id = result.get('indexId')
         return wait_for_index_ready(project_id, cluster_name, index_id, auth)
         
     elif response.status_code == 409:
@@ -114,10 +110,17 @@ def wait_for_index_ready(project_id, cluster_name, index_id, auth, max_wait_time
     print("Waiting for index to be ready...")
     start_time = time.time()
     
+    # Headers for Atlas Admin API v2
+    headers = {
+        "Accept": "application/vnd.atlas.2024-05-30+json",
+        "Content-Type": "application/vnd.atlas.2024-05-30+json"
+    }
+    
     while time.time() - start_time < max_wait_time:
         response = requests.get(
-            f"https://cloud.mongodb.com/api/atlas/v1.0/groups/{project_id}/clusters/{cluster_name}/fts/indexes/{index_id}",
-            auth=auth
+            f"https://cloud.mongodb.com/api/atlas/v2/groups/{project_id}/clusters/{cluster_name}/search/indexes/{index_id}",
+            auth=auth,
+            headers=headers
         )
         
         if response.status_code == 200:
@@ -141,9 +144,16 @@ def validate_search_index_exists(project_id, cluster_name, auth):
     """Validate that the search index exists"""
     print("Validating search index exists...")
     
+    # Headers for Atlas Admin API v2
+    headers = {
+        "Accept": "application/vnd.atlas.2024-05-30+json",
+        "Content-Type": "application/vnd.atlas.2024-05-30+json"
+    }
+    
     response = requests.get(
-        f"https://cloud.mongodb.com/api/atlas/v1.0/groups/{project_id}/clusters/{cluster_name}/fts/indexes",
-        auth=auth
+        f"https://cloud.mongodb.com/api/atlas/v2/groups/{project_id}/clusters/{cluster_name}/search/indexes",
+        auth=auth,
+        headers=headers
     )
     
     if response.status_code == 200:
